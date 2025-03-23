@@ -45,7 +45,7 @@ You can install **The-Monitor** using any of the following methods:
 
 #### Option 1: Clone from GitHub  
 ```bash
-git clone https://github.com/your-username/The-Monitor.git
+git clone https://https://github.com/ABCGala/The-Monitor.
 cd The-Monitor
 ```
 
