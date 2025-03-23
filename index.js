@@ -4,147 +4,147 @@ const API_URL = "https://api-galaswap.gala.com/galachain/api";
 const WALLET_ADDRESS = "your-wallet-address"; // Replace with your wallet address
 const DISCORD_WEBHOOK_URL = "your-discord-webhook-url"; // Replace with your Discord webhook URL
 
-let previousAssetBalance = 0;
-let previousAllowanceBalance = 0;
+let previousBalances = {};
+let previousAllowances = {};
 let intervalId;
 
 /**
- * Sends a styled message to Discord.
+ * Sends a formatted embed message to Discord.
  */
-async function sendDiscordAlert(title, description, color = 3447003) {
-    const embed = {
-        embeds: [
-            {
-                title,
-                description,
-                color,
-                timestamp: new Date().toISOString(),
-                footer: { text: "Gala Chain Balance Monitor" },
-            },
-        ],
-    };
-
+async function sendDiscordEmbed(title, description, color) {
     try {
-        await axios.post(DISCORD_WEBHOOK_URL, embed, {
+        const payload = {
+            embeds: [{
+                title: title,
+                description: description,
+                color: color,
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        await axios.post(DISCORD_WEBHOOK_URL, payload, {
             headers: { "Content-Type": "application/json" },
         });
-        console.log(`✅ Discord alert sent: ${title}`);
+
+        console.log("✅ Discord alert sent:", title);
     } catch (error) {
         console.error("❌ Failed to send Discord alert:", error.message);
     }
 }
 
 /**
- * Fetches the Gala Chain balance.
+ * Fetches the GALA asset balance for a specific wallet.
  */
-async function fetchAssetBalance() {
+async function fetchAssetBalance(wallet) {
     const params = {
         additionalKey: "none",
         category: "Unit",
         collection: "GALA",
         instance: "0",
-        owner: WALLET_ADDRESS,
+        owner: wallet,
         type: "none",
     };
 
     try {
-        console.log("🔍 Fetching Gala Chain balance...");
         const response = await axios.post(`${API_URL}/asset/token-contract/FetchBalances`, params, {
             headers: { "Content-Type": "application/json" },
         });
 
-        if (!response.data || !response.data.Data) {
-            throw new Error("Invalid API response: Missing Data field");
-        }
+        if (!response.data || !response.data.Data) return null;
 
         const data = response.data.Data.find(token => token.collection === "GALA");
         return data ? parseFloat(data.quantity) : 0;
     } catch (error) {
-        console.error("❌ Failed to fetch asset balance:", error.response?.data || error.message);
-        return 0;
+        console.error(`❌ Failed to fetch asset balance for ${wallet}:`, error.response?.data || error.message);
+        return null;
     }
 }
 
 /**
- * Fetches the Treasure Chest (allowance) balance.
+ * Fetches the GALA allowances for a specific wallet.
  */
-async function fetchAllowances() {
+async function fetchAllowances(wallet) {
     const params = {
-        grantedTo: WALLET_ADDRESS,
+        grantedTo: wallet,
         collection: "GALA",
     };
 
     try {
-        console.log("🔍 Fetching Treasure Chest...");
         const response = await axios.post(`${API_URL}/asset/token-contract/FetchAllowances`, params, {
             headers: { "Content-Type": "application/json" },
         });
 
-        if (!response.data || !response.data.Data) {
-            throw new Error("Invalid API response: Missing Data field");
-        }
+        if (!response.data || !response.data.Data) return null;
 
         return response.data.Data;
     } catch (error) {
-        console.error("❌ Failed to fetch allowances:", error.response?.data || error.message);
-        return [];
+        console.error(`❌ Failed to fetch allowances for ${wallet}:`, error.response?.data || error.message);
+        return null;
     }
 }
 
 /**
- * Computes the actual remaining Treasure Chest balance.
+ * Fetches and calculates the correct initial allowance balance.
  */
-async function computeAllowanceBalance() {
-    const allowances = await fetchAllowances();
+async function getCorrectAllowanceBalance(wallet) {
+    const allowances = await fetchAllowances(wallet);
+    if (allowances === null) return 0;
+
     let totalRemaining = 0;
+    const currentTime = Date.now();
 
     allowances.forEach(allowance => {
         const quantity = parseFloat(allowance.quantity) || 0;
         const quantitySpent = parseFloat(allowance.quantitySpent) || 0;
         const remaining = quantity - quantitySpent;
-        if (remaining > 0) totalRemaining += remaining;
+        if (remaining > 0 && (allowance.expires === 0 || allowance.expires > currentTime)) {
+            totalRemaining += remaining;
+        }
     });
 
     return totalRemaining;
 }
 
 /**
- * Checks and updates the Gala Chain balance.
+ * Checks and updates the asset balance for all wallets.
  */
-async function checkAssetBalance() {
-    const currentBalance = await fetchAssetBalance();
+async function checkAssetBalances() {
+    for (const wallet of WALLET_ADDRESSES) {
+        const currentBalance = await fetchAssetBalance(wallet);
+        if (currentBalance === null) continue; // Skip if the API failed
 
-    if (currentBalance !== previousAssetBalance) {
-        const difference = currentBalance - previousAssetBalance;
-        const changeText = difference > 0 ? `🟢 +${difference}` : `🔴 ${difference}`;
-
-        await sendDiscordAlert(
-            "🪙 Gala Chain Balance Updated",
-            `**Previous Balance:** ${previousAssetBalance} GALA\n**New Balance:** ${currentBalance} GALA\n**Change:** ${changeText}`,
-            difference > 0 ? 0x2ecc71 : 0xe74c3c
-        );
-
-        previousAssetBalance = currentBalance;
+        if (previousBalances[wallet] !== undefined && currentBalance !== previousBalances[wallet]) {
+            const diff = currentBalance - previousBalances[wallet];
+            if (Math.abs(diff) > 0.0001) { // Ensure there's a significant change
+                await sendDiscordEmbed(
+                    "💰 Gala Chain Balance Updated",
+                    `🔹 **Wallet:** \`${wallet}\`\n🔹 **Previous:** ${previousBalances[wallet].toLocaleString()} GALA\n🔹 **New:** ${currentBalance.toLocaleString()} GALA\n🔹 **Difference:** ${diff.toLocaleString()} GALA`,
+                    0x2ECC71 // Green color
+                );
+            }
+        }
+        previousBalances[wallet] = currentBalance;
     }
 }
 
 /**
- * Checks and updates the Treasure Chest balance.
+ * Checks and updates the allowance balance for all wallets.
  */
-async function checkAllowanceBalance() {
-    const totalRemaining = await computeAllowanceBalance();
+async function checkAllowanceBalances() {
+    for (const wallet of WALLET_ADDRESSES) {
+        const totalRemaining = await getCorrectAllowanceBalance(wallet);
 
-    if (totalRemaining !== previousAllowanceBalance) {
-        const difference = totalRemaining - previousAllowanceBalance;
-        const changeText = difference > 0 ? `🟢 +${difference}` : `🔴 ${difference}`;
-
-        await sendDiscordAlert(
-            "🎁 Treasure Chest Updated",
-            `**Previous Balance:** ${previousAllowanceBalance} GALA\n**New Balance:** ${totalRemaining} GALA\n**Change:** ${changeText}`,
-            difference > 0 ? 0x2ecc71 : 0xe74c3c
-        );
-
-        previousAllowanceBalance = totalRemaining;
+        if (previousAllowances[wallet] !== undefined && totalRemaining !== previousAllowances[wallet]) {
+            const diff = totalRemaining - previousAllowances[wallet];
+            if (Math.abs(diff) > 0.0001) { // Ensure there's a significant change
+                await sendDiscordEmbed(
+                    "📦 Treasure Chest Updated",
+                    `🔹 **Wallet:** \`${wallet}\`\n🔹 **Previous:** ${previousAllowances[wallet].toLocaleString()} GALA\n🔹 **New:** ${totalRemaining.toLocaleString()} GALA\n🔹 **Difference:** ${diff.toLocaleString()} GALA`,
+                    0xF1C40F // Yellow color
+                );
+            }
+        }
+        previousAllowances[wallet] = totalRemaining;
     }
 }
 
@@ -152,37 +152,43 @@ async function checkAllowanceBalance() {
  * Handles script shutdown.
  */
 async function handleShutdown() {
-    await sendDiscordAlert("🛑 Gala Chain Balance Monitor", "Bot has been stopped.", 0xe74c3c);
+    await sendDiscordEmbed("🛑 Balance Monitor Stopped", "The monitoring service has been stopped.", 0xE74C3C);
     clearInterval(intervalId);
     process.exit(0);
 }
 
 /**
- * Starts the monitoring script.
+ * Starts the monitoring script with the correct initial balances.
  */
 (async () => {
     try {
-        await sendDiscordAlert("🚀 Gala Chain Balance Monitor", "Bot has started successfully.", 0x3498db);
+        await sendDiscordEmbed("🚀 Balance Monitor Started", "The monitoring service is now active.", 0x3498DB);
 
-        // Fetch initial balances
-        previousAssetBalance = await fetchAssetBalance();
-        await sendDiscordAlert("🪙 Initial Gala Chain Balance", `**Balance:** ${previousAssetBalance} GALA`, 0x3498db);
+        for (const wallet of WALLET_ADDRESSES) {
+            // Fetch and store correct initial Gala Chain balance
+            const balance = await fetchAssetBalance(wallet);
+            if (balance !== null) {
+                previousBalances[wallet] = balance;
+                await sendDiscordEmbed("💰 Initial Gala Chain Balance", `🔹 **Wallet:** \`${wallet}\`\n🔹 **Balance:** ${balance.toLocaleString()} GALA`, 0x2ECC71);
+            }
 
-        previousAllowanceBalance = await computeAllowanceBalance();
-        await sendDiscordAlert("🎁 Initial Treasure Chest Balance", `**Balance:** ${previousAllowanceBalance} GALA`, 0x3498db);
+            // Fetch and store correct initial Treasure Chest (allowance) balance
+            const correctAllowance = await getCorrectAllowanceBalance(wallet);
+            previousAllowances[wallet] = correctAllowance;
+            await sendDiscordEmbed("📦 Initial Treasure Chest", `🔹 **Wallet:** \`${wallet}\`\n🔹 **Balance:** ${correctAllowance.toLocaleString()} GALA`, 0xF1C40F);
+        }
 
-        // Start monitoring every 30 seconds
         intervalId = setInterval(async () => {
             console.log("🔄 Checking balances...");
-            await checkAssetBalance();
-            await checkAllowanceBalance();
+            await checkAssetBalances();
+            await checkAllowanceBalances();
         }, 30000); // 30 seconds
 
         process.on("SIGINT", handleShutdown);
         process.on("SIGTERM", handleShutdown);
     } catch (error) {
         console.error("❌ Script error:", error.message);
-        await sendDiscordAlert("❌ Balance Monitor Error", error.message, 0xe74c3c);
+        await sendDiscordEmbed("❌ Balance Monitor Error", error.message, 0xE74C3C);
         process.exit(1);
     }
 })();
