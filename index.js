@@ -12,24 +12,26 @@ let previousAllowances = {};
 let intervalId;
 
 /**
- * Sends a formatted embed message to Discord.
+ * Sends an embedded message to Discord.
  */
-async function sendDiscordEmbed(title, description, color) {
-    try {
-        const payload = {
-            embeds: [{
-                title: title,
-                description: description,
-                color: color,
-                timestamp: new Date().toISOString()
-            }]
-        };
+async function sendDiscordEmbed(title, description, color = 3447003) {
+    const embed = {
+        embeds: [
+            {
+                title,
+                description,
+                color,
+                timestamp: new Date().toISOString(),
+                footer: { text: "Gala Chain Balance Monitor" },
+            },
+        ],
+    };
 
-        await axios.post(DISCORD_WEBHOOK_URL, payload, {
+    try {
+        await axios.post(DISCORD_WEBHOOK_URL, embed, {
             headers: { "Content-Type": "application/json" },
         });
-
-        console.log("✅ Discord alert sent:", title);
+        console.log(`✅ Discord alert sent: ${title}`);
     } catch (error) {
         console.error("❌ Failed to send Discord alert:", error.message);
     }
@@ -87,11 +89,11 @@ async function fetchAllowances(wallet) {
 }
 
 /**
- * Fetches and calculates the correct initial allowance balance.
+ * Calculates the correct initial allowance balance.
  */
 async function getCorrectAllowanceBalance(wallet) {
     const allowances = await fetchAllowances(wallet);
-    if (allowances === null) return 0;
+    if (allowances === null) return null;
 
     let totalRemaining = 0;
     const currentTime = Date.now();
@@ -100,6 +102,7 @@ async function getCorrectAllowanceBalance(wallet) {
         const quantity = parseFloat(allowance.quantity) || 0;
         const quantitySpent = parseFloat(allowance.quantitySpent) || 0;
         const remaining = quantity - quantitySpent;
+
         if (remaining > 0 && (allowance.expires === 0 || allowance.expires > currentTime)) {
             totalRemaining += remaining;
         }
@@ -114,17 +117,20 @@ async function getCorrectAllowanceBalance(wallet) {
 async function checkAssetBalances() {
     for (const wallet of WALLET_ADDRESSES) {
         const currentBalance = await fetchAssetBalance(wallet);
-        if (currentBalance === null) continue; // Skip if the API failed
+        if (currentBalance === null) continue;
 
         if (previousBalances[wallet] !== undefined && currentBalance !== previousBalances[wallet]) {
             const diff = currentBalance - previousBalances[wallet];
-            if (Math.abs(diff) > 0.0001) { // Ensure there's a significant change
-                await sendDiscordEmbed(
-                    "💰 Gala Chain Balance Updated",
-                    `🔹 **Wallet:** \`${wallet}\`\n🔹 **Previous:** ${previousBalances[wallet].toLocaleString()} GALA\n🔹 **New:** ${currentBalance.toLocaleString()} GALA\n🔹 **Difference:** ${diff.toLocaleString()} GALA`,
-                    0x2ECC71 // Green color
-                );
-            }
+            const changeText = diff > 0 ? `🟢 +${diff.toLocaleString()}` : `🔴 ${diff.toLocaleString()}`;
+
+            await sendDiscordEmbed(
+                "💰 Gala Chain Balance Updated",
+                `🔹 **Wallet:** \`${wallet}\`\n` +
+                `🔹 **Previous:** ${previousBalances[wallet].toLocaleString()} GALA\n` +
+                `🔹 **New:** ${currentBalance.toLocaleString()} GALA\n` +
+                `🔹 **Change:** ${changeText}`,
+                diff > 0 ? 0x2ecc71 : 0xe74c3c
+            );
         }
         previousBalances[wallet] = currentBalance;
     }
@@ -136,16 +142,20 @@ async function checkAssetBalances() {
 async function checkAllowanceBalances() {
     for (const wallet of WALLET_ADDRESSES) {
         const totalRemaining = await getCorrectAllowanceBalance(wallet);
+        if (totalRemaining === null) continue;
 
         if (previousAllowances[wallet] !== undefined && totalRemaining !== previousAllowances[wallet]) {
             const diff = totalRemaining - previousAllowances[wallet];
-            if (Math.abs(diff) > 0.0001) { // Ensure there's a significant change
-                await sendDiscordEmbed(
-                    "📦 Treasure Chest Updated",
-                    `🔹 **Wallet:** \`${wallet}\`\n🔹 **Previous:** ${previousAllowances[wallet].toLocaleString()} GALA\n🔹 **New:** ${totalRemaining.toLocaleString()} GALA\n🔹 **Difference:** ${diff.toLocaleString()} GALA`,
-                    0xF1C40F // Yellow color
-                );
-            }
+            const changeText = diff > 0 ? `🟢 +${diff.toLocaleString()}` : `🔴 ${diff.toLocaleString()}`;
+
+            await sendDiscordEmbed(
+                "📦 Treasure Chest Updated",
+                `🔹 **Wallet:** \`${wallet}\`\n` +
+                `🔹 **Previous:** ${previousAllowances[wallet].toLocaleString()} GALA\n` +
+                `🔹 **New:** ${totalRemaining.toLocaleString()} GALA\n` +
+                `🔹 **Change:** ${changeText}`,
+                diff > 0 ? 0x2ecc71 : 0xe74c3c
+            );
         }
         previousAllowances[wallet] = totalRemaining;
     }
@@ -155,7 +165,7 @@ async function checkAllowanceBalances() {
  * Handles script shutdown.
  */
 async function handleShutdown() {
-    await sendDiscordEmbed("🛑 Balance Monitor Stopped", "The monitoring service has been stopped.", 0xE74C3C);
+    await sendDiscordEmbed("🛑 Balance Monitor Stopped", "The monitoring service has been stopped.", 0xe74c3c);
     clearInterval(intervalId);
     process.exit(0);
 }
@@ -165,33 +175,45 @@ async function handleShutdown() {
  */
 (async () => {
     try {
-        await sendDiscordEmbed("🚀 Balance Monitor Started", "The monitoring service is now active.", 0x3498DB);
+        await sendDiscordEmbed("🚀 Balance Monitor Started", "The monitoring service is now active.", 0x3498db);
 
         for (const wallet of WALLET_ADDRESSES) {
             // Fetch and store correct initial Gala Chain balance
             const balance = await fetchAssetBalance(wallet);
             if (balance !== null) {
                 previousBalances[wallet] = balance;
-                await sendDiscordEmbed("💰 Initial Gala Chain Balance", `🔹 **Wallet:** \`${wallet}\`\n🔹 **Balance:** ${balance.toLocaleString()} GALA`, 0x2ECC71);
+                await sendDiscordEmbed(
+                    "💰 Initial Gala Chain Balance",
+                    `🔹 **Wallet:** \`${wallet}\`\n` +
+                    `🔹 **Balance:** ${balance.toLocaleString()} GALA`,
+                    0x3498db
+                );
             }
 
             // Fetch and store correct initial Treasure Chest (allowance) balance
             const correctAllowance = await getCorrectAllowanceBalance(wallet);
-            previousAllowances[wallet] = correctAllowance;
-            await sendDiscordEmbed("📦 Initial Treasure Chest", `🔹 **Wallet:** \`${wallet}\`\n🔹 **Balance:** ${correctAllowance.toLocaleString()} GALA`, 0xF1C40F);
+            if (correctAllowance !== null) {
+                previousAllowances[wallet] = correctAllowance;
+                await sendDiscordEmbed(
+                    "📦 Initial Treasure Chest Balance",
+                    `🔹 **Wallet:** \`${wallet}\`\n` +
+                    `🔹 **Balance:** ${correctAllowance.toLocaleString()} GALA`,
+                    0x3498db
+                );
+            }
         }
 
         intervalId = setInterval(async () => {
             console.log("🔄 Checking balances...");
             await checkAssetBalances();
             await checkAllowanceBalances();
-        }, 30000); // 30 seconds
+        }, 30000);
 
         process.on("SIGINT", handleShutdown);
         process.on("SIGTERM", handleShutdown);
     } catch (error) {
         console.error("❌ Script error:", error.message);
-        await sendDiscordEmbed("❌ Balance Monitor Error", error.message, 0xE74C3C);
+        await sendDiscordEmbed("❌ Balance Monitor Error", error.message, 0xe74c3c);
         process.exit(1);
     }
 })();
