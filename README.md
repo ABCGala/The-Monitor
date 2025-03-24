@@ -20,6 +20,9 @@ You need **Node.js** and **npm** installed to run The-Monitor.
 #### On Linux/macOS  
 Run the following commands to install Node.js:  
 ```bash
+sudo apt update
+sudo apt upgrade
+sudo apt install curl
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
