@@ -3,7 +3,8 @@ const axios = require("axios");
 const API_URL = "https://api-galaswap.gala.com/galachain/api";
 const WALLET_ADDRESSES = [
     "client|wallet_address_1",
-    "client|wallet_address_2"
+    "client|wallet_address_2",
+    "client|wallet_address_3"
 ]; // Replace with your wallet addresses
 const DISCORD_WEBHOOK_URL = "your-discord-webhook-url"; // Replace with your Discord webhook URL
 
