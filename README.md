@@ -72,7 +72,11 @@ Edit the configuration file (`config.js`) or modify `index.js` directly:
 
 Example:  
 ```js
-const WALLET_ADDRESS = "client|your_wallet_address";
+const WALLET_ADDRESSES = [
+    "client|wallet_address_1",
+    "client|wallet_address_2",
+    "client|wallet_address_3"
+]; // Replace with your wallet addresses
 const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/your_webhook";
 ```
 
